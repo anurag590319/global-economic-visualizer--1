@@ -10,6 +10,7 @@ export const cache = new NodeCache({
 
 // Cache key generators
 export const cacheKeys = {
+  bootstrap: 'bootstrap:v1',
   countries: 'countries:all',
   interestRates: 'rates:interest',
   inflationRates: 'rates:inflation',

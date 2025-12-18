@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import LazyMap from './components/LazyMap';
-import HistoryChart from './components/HistoryChart';
-import AIAnalysis from './components/AIAnalysis';
 import { Country, RateData, DataType } from './types';
 import { api } from './utils/api';
 import './App.css';
+
+// Code-split drawer-only components (recharts is heavy and should not be in entry bundle)
+const HistoryChart = lazy(() => import('./components/HistoryChart'));
+const AIAnalysis = lazy(() => import('./components/AIAnalysis'));
 
 function App() {
   const [countries, setCountries] = useState<Country[]>([]);
@@ -74,84 +76,34 @@ function App() {
       setError(null);
 
       try {
-        // Use Promise.allSettled to handle partial failures gracefully
-        const results = await Promise.allSettled([
-          api.getCountries(),
-          api.getInterestRates(),
-          api.getInflationRates(),
-          api.getExchangeRates(),
-          api.getGDPGrowthRates(),
-          api.getUnemploymentRates(),
-          api.getGovernmentDebtRates(),
-          api.getGDPPerCapitaRates(),
-          api.getTradeBalanceRates(),
-          api.getCurrentAccountRates(),
-          api.getFDIRates(),
-          api.getPopulationGrowthRates(),
-          api.getLifeExpectancyRates(),
-          api.getGiniCoefficientRates(),
-          api.getExportsRates(),
-        ]);
+        // Fast path: one request instead of ~14 round trips
+        const bootstrap = await api.getBootstrap();
 
-        // Extract results, using empty arrays for failed requests
-        const endpointNames = [
-          'countries', 'interest', 'inflation', 'exchange', 'gdp',
-          'unemployment', 'government-debt', 'gdp-per-capita',
-          'trade-balance', 'current-account', 'fdi', 'population-growth',
-          'life-expectancy', 'gini-coefficient', 'exports'
-        ];
-
-        const countriesResp = results[0].status === 'fulfilled' 
-          ? results[0].value as Country[]
-          : (console.warn(`Failed to fetch ${endpointNames[0]}:`, results[0].reason), [] as Country[]);
-
-        const [
-          interest,
-          inflation,
-          exchange,
-          gdp,
-          unemployment,
-          governmentDebt,
-          gdpPerCapita,
-          tradeBalance,
-          currentAccount,
-          fdi,
-          populationGrowth,
-          lifeExpectancy,
-          giniCoefficient,
-          exports
-        ] = results.slice(1).map((result, index) => {
-          if (result.status === 'fulfilled') {
-            return result.value as RateData[];
-          } else {
-            console.warn(`Failed to fetch ${endpointNames[index + 1]}:`, result.reason);
-            return [] as RateData[];
-          }
-        });
-
-        // Check if at least countries loaded (critical)
-        if (countriesResp.length === 0) {
+        if (!bootstrap.countries || bootstrap.countries.length === 0) {
           throw new Error('Failed to load countries. Please check your API connection.');
         }
 
-        setCountries(countriesResp);
-        setInterestData(interest);
-        setInflationData(inflation);
-        setExchangeData(exchange);
-        setGdpData(gdp);
-        setUnemploymentData(unemployment);
-        setGovernmentDebtData(governmentDebt);
-        setGdpPerCapitaData(gdpPerCapita);
-        setTradeBalanceData(tradeBalance);
-        setCurrentAccountData(currentAccount);
-        setFdiData(fdi);
-        setPopulationGrowthData(populationGrowth);
-        setLifeExpectancyData(lifeExpectancy);
-        setGiniCoefficientData(giniCoefficient);
-        setExportsData(exports);
+        setCountries(bootstrap.countries);
+        setInterestData(bootstrap.rates.interest);
+        setInflationData(bootstrap.rates.inflation);
+        setExchangeData(bootstrap.rates.exchange);
+        setGdpData(bootstrap.rates.gdp);
+        setUnemploymentData(bootstrap.rates.unemployment);
+        setGovernmentDebtData(bootstrap.rates['government-debt']);
+        setGdpPerCapitaData(bootstrap.rates['gdp-per-capita']);
+        setTradeBalanceData(bootstrap.rates['trade-balance']);
+        setCurrentAccountData(bootstrap.rates['current-account']);
+        setFdiData(bootstrap.rates.fdi);
+        setPopulationGrowthData(bootstrap.rates['population-growth']);
+        setLifeExpectancyData(bootstrap.rates['life-expectancy']);
+        setGiniCoefficientData(bootstrap.rates['gini-coefficient']);
+        setExportsData(bootstrap.rates.exports);
       } catch (err: any) {
         console.error('Error fetching data:', err);
-        setError(err.message || 'Failed to load data. Please ensure the backend is running and check the browser console for details.');
+        setError(
+          err.message ||
+            'Failed to load data. Please ensure the backend is running and check the browser console for details.'
+        );
       } finally {
         setLoading(false);
       }
@@ -168,40 +120,9 @@ function App() {
       setLoadingHistory(true);
       try {
         const iso = selectedIso;
-        // Fetch all history in parallel
-        const [int, inf, ex, gdp, unemp, govDebt, gdpPC, trade, currentAcc, fdi, popGrowth, lifeExp, gini, exports] = await Promise.all([
-          api.getHistoricalRates(iso, 'interest'),
-          api.getHistoricalRates(iso, 'inflation'),
-          api.getHistoricalRates(iso, 'exchange'),
-          api.getHistoricalRates(iso, 'gdp'),
-          api.getHistoricalRates(iso, 'unemployment'),
-          api.getHistoricalRates(iso, 'government-debt'),
-          api.getHistoricalRates(iso, 'gdp-per-capita'),
-          api.getHistoricalRates(iso, 'trade-balance'),
-          api.getHistoricalRates(iso, 'current-account'),
-          api.getHistoricalRates(iso, 'fdi'),
-          api.getHistoricalRates(iso, 'population-growth'),
-          api.getHistoricalRates(iso, 'life-expectancy'),
-          api.getHistoricalRates(iso, 'gini-coefficient'),
-          api.getHistoricalRates(iso, 'exports'),
-        ]);
-
-        setHistory({
-          interest: int,
-          inflation: inf,
-          exchange: ex,
-          gdp,
-          unemployment: unemp,
-          'government-debt': govDebt,
-          'gdp-per-capita': gdpPC,
-          'trade-balance': trade,
-          'current-account': currentAcc,
-          'fdi': fdi,
-          'population-growth': popGrowth,
-          'life-expectancy': lifeExp,
-          'gini-coefficient': gini,
-          'exports': exports,
-        });
+        // Single request instead of 14 round trips
+        const all = await api.getAllHistoricalRates(iso);
+        setHistory(all);
       } catch (e) {
         console.error('Failed to fetch history', e);
       } finally {
@@ -520,11 +441,15 @@ function App() {
         </div>
 
         <div className="drawer-body">
-          <AIAnalysis
-            countryIso={selectedIso || ''}
-            countryName={selectedCountry?.name || selectedIso || ''}
-            autoGenerate={false}
-          />
+          {drawerOpen && selectedIso && (
+            <Suspense fallback={null}>
+              <AIAnalysis
+                countryIso={selectedIso || ''}
+                countryName={selectedCountry?.name || selectedIso || ''}
+                autoGenerate={false}
+              />
+            </Suspense>
+          )}
 
           <div className="drawer-section-title">Current Indicators</div>
 
@@ -589,6 +514,7 @@ function App() {
           <div className="drawer-section-title" style={{ marginTop: '24px' }}>Historical Trends</div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <Suspense fallback={null}>
             <div>
               <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>Real Interest Rate History</div>
               <HistoryChart
@@ -718,6 +644,7 @@ function App() {
                 loading={loadingHistory}
               />
             </div>
+            </Suspense>
           </div>
 
           <div className="drawer-note" style={{ marginTop: 20 }}>

@@ -6,64 +6,12 @@ import { fetchExchangeRates } from '../services/exchangeRateService';
 import { analyzeCountryEconomy, CountryData } from '../services/aiAnalysisService';
 import { dataLimiter, aiLimiter } from '../middleware/rateLimiter';
 import { aiRequestQueue } from '../utils/requestQueue';
+import { dedupeLatestByCountry, formatRatesForMap, RateRow } from '../utils/ratesFormat';
 
 const router = Router();
 
 // Apply rate limiting to all data endpoints
 router.use(dataLimiter);
-
-type RateRow = {
-  country_iso: string;
-  country_name?: string;
-  value: number;
-  currency_code?: string | null;
-  period?: string | null;
-  effective_date?: string;
-  updated_at: string;
-  is_estimated?: boolean;
-  estimated_from?: 'region_avg' | 'global_avg';
-};
-
-// Format rates for frontend consumption
-function formatRatesForMap(rates: any[]) {
-  return rates.map(rate => ({
-    country_iso: rate.country_iso,
-    country_name: rate.country_name,
-    value: rate.rate || rate.rate_to_usd,
-    currency_code: rate.currency_code || null,
-    period: rate.period || null,
-    effective_date: rate.effective_date,
-    updated_at: rate.updated_at,
-  }));
-}
-
-// Deduplicate by country, keeping the most recent data by effective_date
-// This ensures we return the latest available data for each country
-function dedupeLatestByCountry(rows: RateRow[]): RateRow[] {
-  const byIso = new Map<string, RateRow>();
-  for (const row of rows) {
-    const iso = row.country_iso;
-    const existing = byIso.get(iso);
-    if (!existing) {
-      byIso.set(iso, row);
-      continue;
-    }
-    
-    // Compare by effective_date first (actual data date), then updated_at as fallback
-    const existingDate = existing.effective_date 
-      ? new Date(existing.effective_date).getTime() 
-      : new Date(existing.updated_at).getTime();
-    const rowDate = row.effective_date 
-      ? new Date(row.effective_date).getTime() 
-      : new Date(row.updated_at).getTime();
-    
-    // Keep the row with the most recent effective_date
-    if (rowDate >= existingDate) {
-      byIso.set(iso, row);
-    }
-  }
-  return Array.from(byIso.values());
-}
 
 // No longer filling missing countries with estimates - only return real data
 
@@ -457,6 +405,37 @@ router.get('/analyze/:countryIso', aiLimiter, async (req, res) => {
     }
     
     res.status(500).json({ error: errorMessage });
+  }
+});
+
+// Fetch all historical series for a country in a single request (faster than 14 round trips).
+router.get('/history/:countryIso', (req, res) => {
+  try {
+    const { countryIso } = req.params;
+    if (!countryIso) return res.status(400).json({ error: 'Country ISO code required' });
+
+    const iso = countryIso.toUpperCase();
+    const series = {
+      interest: RateModel.getHistoricalRates(iso, 'interest'),
+      inflation: RateModel.getHistoricalRates(iso, 'inflation'),
+      exchange: RateModel.getHistoricalRates(iso, 'exchange'),
+      gdp: RateModel.getHistoricalRates(iso, 'gdp'),
+      unemployment: RateModel.getHistoricalRates(iso, 'unemployment'),
+      'government-debt': RateModel.getHistoricalRates(iso, 'government-debt'),
+      'gdp-per-capita': RateModel.getHistoricalRates(iso, 'gdp-per-capita'),
+      'trade-balance': RateModel.getHistoricalRates(iso, 'trade-balance'),
+      'current-account': RateModel.getHistoricalRates(iso, 'current-account'),
+      fdi: RateModel.getHistoricalRates(iso, 'fdi'),
+      'population-growth': RateModel.getHistoricalRates(iso, 'population-growth'),
+      'life-expectancy': RateModel.getHistoricalRates(iso, 'life-expectancy'),
+      'gini-coefficient': RateModel.getHistoricalRates(iso, 'gini-coefficient'),
+      exports: RateModel.getHistoricalRates(iso, 'exports'),
+    };
+
+    res.json(series);
+  } catch (error) {
+    console.error(`Error fetching all history for ${req.params.countryIso}:`, error);
+    res.status(500).json({ error: 'Failed to fetch historical data' });
   }
 });
 
