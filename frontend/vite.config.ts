@@ -12,5 +12,19 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('mapbox-gl')) return 'mapbox';
+          if (id.includes('recharts')) return 'charts';
+          if (id.includes('/react/') || id.includes('react-dom')) return 'react-vendor';
+          if (id.includes('axios')) return 'http';
+          return 'vendor';
+        },
+      },
+    },
+  },
 });
 

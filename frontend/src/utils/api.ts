@@ -1,8 +1,8 @@
 import axios from 'axios';
-import { Country, RateData } from '../types';
+import { BootstrapResponse, Country, HistoryByType, RateData } from '../types';
 
-// Default to 3001 (our backend dev server port)
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// Prefer same-origin calls (Vite proxy in dev, server in prod). Override via VITE_API_URL when needed.
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Log API URL in development to help debug
 if (import.meta.env.DEV) {
@@ -10,6 +10,11 @@ if (import.meta.env.DEV) {
 }
 
 export const api = {
+  getBootstrap: async (): Promise<BootstrapResponse> => {
+    const response = await axios.get<BootstrapResponse>(`${API_URL}/bootstrap`);
+    return response.data;
+  },
+
   getCountries: async (): Promise<Country[]> => {
     try {
       const response = await axios.get<Country[]>(`${API_URL}/countries`);
@@ -93,6 +98,11 @@ export const api = {
 
   getHistoricalRates: async (countryIso: string, type: string): Promise<any[]> => {
     const response = await axios.get<any[]>(`${API_URL}/rates/history/${countryIso}/${type}`);
+    return response.data;
+  },
+
+  getAllHistoricalRates: async (countryIso: string): Promise<HistoryByType> => {
+    const response = await axios.get<HistoryByType>(`${API_URL}/rates/history/${countryIso}`);
     return response.data;
   },
 

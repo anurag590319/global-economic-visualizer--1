@@ -2,6 +2,10 @@ import { Router } from 'express';
 import countriesRouter from './countries';
 import ratesRouter from './rates';
 import { aiRequestQueue } from '../utils/requestQueue';
+import { cache, cacheKeys } from '../config/cache';
+import { CountryModel } from '../models/Country';
+import { RateModel } from '../models/Rate';
+import { dedupeLatestByCountry, formatRatesForMap } from '../utils/ratesFormat';
 
 const router = Router();
 
@@ -12,6 +16,89 @@ router.get('/health', (req, res) => {
     uptime: process.uptime(),
     queue: aiRequestQueue.getStatus()
   });
+});
+
+// Bootstrap endpoint: returns countries + all "latest" rate datasets in one call.
+// This is primarily to reduce frontend load time by avoiding ~14 round trips.
+router.get('/bootstrap', async (req, res) => {
+  try {
+    const cached = cache.get(cacheKeys.bootstrap);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const countriesCached = cache.get(cacheKeys.countries);
+    const countries = (countriesCached as any[]) || CountryModel.getAll();
+    if (!countriesCached) cache.set(cacheKeys.countries, countries);
+
+    const getRates = (key: string, getter: () => any[]) => {
+      const c = cache.get(key);
+      if (c) return c as any[];
+      const rows = dedupeLatestByCountry(formatRatesForMap(getter()) as any);
+      cache.set(key, rows);
+      return rows;
+    };
+
+    const interest = getRates(cacheKeys.interestRates, RateModel.getInterestRates);
+    const inflation = getRates(cacheKeys.inflationRates, RateModel.getInflationRates);
+
+    // Exchange rates may be empty on a fresh DB; mimic /rates/exchange behavior
+    let exchangeCached = cache.get(cacheKeys.exchangeRates) as any[] | undefined;
+    let exchange: any[] = exchangeCached || [];
+    if (!exchangeCached) {
+      let rows = RateModel.getExchangeRates();
+      if (!rows || rows.length === 0) {
+        try {
+          const { fetchExchangeRates } = await import('../services/exchangeRateService');
+          await fetchExchangeRates();
+          cache.del(cacheKeys.exchangeRates);
+          rows = RateModel.getExchangeRates();
+        } catch (e) {
+          rows = [];
+        }
+      }
+      exchange = dedupeLatestByCountry(formatRatesForMap(rows) as any);
+      cache.set(cacheKeys.exchangeRates, exchange);
+    }
+
+    const gdp = getRates(cacheKeys.gdpGrowthRates, RateModel.getGDPGrowthRates);
+    const unemployment = getRates(cacheKeys.unemploymentRates, RateModel.getUnemploymentRates);
+    const governmentDebt = getRates(cacheKeys.governmentDebtRates, RateModel.getGovernmentDebtRates);
+    const gdpPerCapita = getRates(cacheKeys.gdpPerCapitaRates, RateModel.getGDPPerCapitaRates);
+    const tradeBalance = getRates(cacheKeys.tradeBalanceRates, RateModel.getTradeBalanceRates);
+    const currentAccount = getRates(cacheKeys.currentAccountRates, RateModel.getCurrentAccountRates);
+    const fdi = getRates(cacheKeys.fdiRates, RateModel.getFDIRates);
+    const populationGrowth = getRates(cacheKeys.populationGrowthRates, RateModel.getPopulationGrowthRates);
+    const lifeExpectancy = getRates(cacheKeys.lifeExpectancyRates, RateModel.getLifeExpectancyRates);
+    const giniCoefficient = getRates(cacheKeys.giniCoefficientRates, RateModel.getGiniCoefficientRates);
+    const exports = getRates(cacheKeys.exportsRates, RateModel.getExportsRates);
+
+    const payload = {
+      countries,
+      rates: {
+        interest,
+        inflation,
+        exchange,
+        gdp,
+        unemployment,
+        'government-debt': governmentDebt,
+        'gdp-per-capita': gdpPerCapita,
+        'trade-balance': tradeBalance,
+        'current-account': currentAccount,
+        fdi,
+        'population-growth': populationGrowth,
+        'life-expectancy': lifeExpectancy,
+        'gini-coefficient': giniCoefficient,
+        exports,
+      },
+    };
+
+    cache.set(cacheKeys.bootstrap, payload);
+    res.json(payload);
+  } catch (error) {
+    console.error('Error building bootstrap payload:', error);
+    res.status(500).json({ error: 'Failed to build bootstrap payload' });
+  }
 });
 
 // Manual data fetch trigger endpoint
