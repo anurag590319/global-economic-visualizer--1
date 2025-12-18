@@ -9,7 +9,7 @@ import './services/scheduler'; // Initialize cron jobs
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 // Middleware
@@ -40,9 +40,9 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📊 API endpoints available at http://localhost:${PORT}/api`);
-  console.log(`❤️  Health check: http://localhost:${PORT}/api/health`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`📊 API endpoints available at http://0.0.0.0:${PORT}/api`);
+  console.log(`❤️  Health check: http://0.0.0.0:${PORT}/api/health`);
 });
 
